@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 app = FastAPI(
     title="Api TownCenter",
     version="v1",
-    docs_url="/index",
+    docs_url="/",
     openapi_url="/swagger/v1/swagger.json"
 )
 
