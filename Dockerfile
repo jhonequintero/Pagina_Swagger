@@ -2,15 +2,16 @@
 FROM python:3.11-slim
 
 # Instalar dependencias del sistema y el Driver de Microsoft para SQL Server
+# Instalar dependencias del sistema y el Driver de Microsoft para SQL Server
 RUN apt-get update && apt-get install -y \
     curl \
     gnupg \
-    && curl https://packages.microsoft.com/keys/microsoft.asc | apt-key add - \
-    && curl https://packages.microsoft.com/config/debian/11/prod.list > /etc/apt/sources.list.d/mssql-release.list \
+    && mkdir -p /etc/apt/keyrings \
+    && curl https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor -o /etc/apt/keyrings/microsoft.gpg \
+    && echo "deb [arch=amd64,arm64,armhf signed-by=/etc/apt/keyrings/microsoft.gpg] https://packages.microsoft.com/debian/12/prod bookworm main" > /etc/apt/sources.list.d/mssql-release.list \
     && apt-get update \
     && ACCEPT_EULA=Y apt-get install -y msodbcsql17 unixodbc-dev \
     && apt-get clean
-
 # Directorio de trabajo
 WORKDIR /app
 
