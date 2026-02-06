@@ -7,24 +7,37 @@ from pydantic import BaseModel
 from datetime import datetime, timedelta
 
 # --- Configuración de la base de datos ---
-DRIVER_VERSION = "ODBC Driver 17 for SQL Server"
-DB_SERVER = os.environ.get("DB_SERVER", "localhost")
-DB_NAME = os.environ.get("DB_NAME", "WebApi")
-DB_USER = os.environ.get("DB_USER", "sa")
-DB_PASSWORD = os.environ.get("DB_PASSWORD", "")
+DB_SERVER = os.environ.get("DB_SERVER", "192.168.1.16")
+DB_NAME = os.environ.get("DB_NAME", "ETL")
+DB_USER = os.environ.get("DB_USER", "integraciones")
+DB_PASSWORD = os.environ.get("DB_PASSWORD", "Nova2020**") 
+
+DRIVER_VERSION = '{ODBC Driver 17 for SQL Server}'
+
 
 CONN_STRING = (
     f"DRIVER={{{DRIVER_VERSION}}};" 
     f"SERVER={DB_SERVER};"
     f"DATABASE={DB_NAME};"
     f"UID={DB_USER};"
-    f"PWD={DB_PASSWORD};" # Eliminé los corchetes extra aquí para evitar errores de sintaxis en el PWD
+    f"PWD={{{DB_PASSWORD}}};"  # Agregué llaves aquí para proteger los asteriscos
 )
 
-def get_connection():
-    # Eliminé autocommit=False para que las consultas simples funcionen directo
-    return pyodbc.connect(CONN_STRING, timeout=10)
 
+#conectar ala base de datos 
+def get_connection():
+    # print(f"DEBUG: Intentando conectar con el usuario: {DB_USER} al servidor {DB_SERVER}")
+    return pyodbc.connect(
+        CONN_STRING,
+        timeout=10,
+        autocommit=False
+        
+    )
+    
+    
+    
+    
+    
 # --- Encabezado API ---
 app = FastAPI(
     title="Api Jhoneider Quintero",
@@ -142,18 +155,11 @@ def get_all_customers(auth=Depends(validar_token)):
                                                         
 
 
-    
-        
-            
-                
                     
                         
                             
                                 
-                                    
-
-
-
+                    
                                     
                                 
                             
