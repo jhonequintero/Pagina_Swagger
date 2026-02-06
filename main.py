@@ -6,33 +6,33 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
 from datetime import datetime, timedelta
 
-# --- Configuración de la base de datos ---
-# Importante: No uses doble llave {{}} aquí, pyodbc en Linux es estricto
+# =====================================================
+# CONFIGURACIÓN BASE DE DATOS
+# =====================================================
+
 DB_SERVER = os.environ.get("DB_SERVER", "192.168.1.16")
-DB_NAME = os.environ.get("DB_NAME", "ETL")
-DB_USER = os.environ.get("DB_USER", "integraciones")
-DB_PASSWORD = os.environ.get("DB_PASSWORD", "c**") 
+DB_NAME = os.environ.get("DB_NAME", "webventas")
+DB_USER = os.environ.get("DB_USER", "ccontreras")
+DB_PASSWORD = os.environ.get("DB_PASSWORD", "Nova2030*")
 
-# El driver debe ir sin llaves aquí, se las ponemos solo una vez en la cadena
-DRIVER_VERSION = 'ODBC Driver 17 for SQL Server'
+DRIVER_VERSION = "ODBC Driver 17 for SQL Server"
 
-# Cadena de conexión limpia para Linux/Render
 CONN_STRING = (
-    f"DRIVER={{{DRIVER_VERSION}}};" 
+    f"DRIVER={{{DRIVER_VERSION}}};"
     f"SERVER={DB_SERVER};"
     f"DATABASE={DB_NAME};"
     f"UID={DB_USER};"
     f"PWD={DB_PASSWORD};"
-    "Encrypt=yes;"
-    "TrustServerCertificate=yes;"
-    "Connection Timeout=30;"
+    f"TrustServerCertificate=yes;"
 )
 
 def get_connection():
-    # Retornamos la conexión con timeout aumentado para red externa
-    return pyodbc.connect(CONN_STRING, timeout=30)
+    return pyodbc.connect(CONN_STRING, timeout=10)
 
-# --- Encabezado API ---
+# =====================================================
+# FASTAPI
+# =====================================================
+
 app = FastAPI(
     title="Api Jhoneider Quintero",
     version="v1",
@@ -43,92 +43,187 @@ app = FastAPI(
 security = HTTPBearer()
 tokens_con_vencimiento = {}
 
-# --- Modelos ---
+# =====================================================
+# MODELOS
+# =====================================================
+
 class LoginRequest(BaseModel):
     username: str
     password: str
 
-# Modelo para el POST de Clientes
-class ClienteNuevo(BaseModel):
-    documento: str
-    cupoOtorgado: float
-    nombres: str
-    apellidos: str
-    email: str
+# =====================================================
+# SEGURIDAD - TOKEN
+# =====================================================
 
-# --- Validar token ---
-def validar_token(credentials: HTTPAuthorizationCredentials = Depends(security)):
-    token_recibido = credentials.credentials
-    if token_recibido.startswith("Bearer "):
-        token_recibido = token_recibido.replace("Bearer ", "").strip()
-    
+def validar_token(
+    credentials: HTTPAuthorizationCredentials = Depends(security)
+):
+    token = credentials.credentials
+
+    if token.startswith("Bearer "):
+        token = token.replace("Bearer ", "").strip()
+
     ahora = datetime.now()
-    if token_recibido not in tokens_con_vencimiento or ahora > tokens_con_vencimiento[token_recibido]:
-        raise HTTPException(status_code=401, detail="Token inválido o expirado")
-    return True
 
-# --- Autenticar ---
+    if token not in tokens_con_vencimiento:
+        raise HTTPException(status_code=401, detail="Token inválido")
+
+    if ahora > tokens_con_vencimiento[token]:
+        del tokens_con_vencimiento[token]
+        raise HTTPException(status_code=401, detail="Token expirado")
+
+    return token
+
+# =====================================================
+# LOGIN
+# =====================================================
+
 @app.post("/api/Authenticate/login", tags=["Authenticate"])
 def login(request: LoginRequest):
     if request.username == "Administrador" and request.password == "Quintero1234@":
         vence = datetime.now() + timedelta(hours=3)
-        token_aleatorio = secrets.token_urlsafe(120)
-        tokens_con_vencimiento[token_aleatorio] = vence
+        token = secrets.token_urlsafe(120)
+
+        tokens_con_vencimiento[token] = vence
+
         return {
-            "token": token_aleatorio,
+            "token": token,
             "expiration": vence.strftime("%Y-%m-%dT%H:%M:%SZ")
         }
+
     raise HTTPException(status_code=401, detail="Credenciales incorrectas")
 
-# --- Métodos Bdatam ---
 
-@app.post("/api/Bdatam/CreateCustomer", tags=["Bdatam"], summary="Registrar nuevo cliente")
-def create_customer(cliente: ClienteNuevo, auth=Depends(validar_token)):
+
+
+
+
+
+# =====================================================
+# CONSULTA BODEGA - EXISTENCIA
+# =====================================================
+
+@app.get("/api/consultas/bodega-existencia", tags=["Consultas"])
+def obtener_existencia_bodega(
+    sucursal: str,   # CUC
+    bodega: str,     # 001
+    empresa: str,    # CBB SAS
+
+    token: str = Depends(validar_token)
+):
     try:
+        # Limpieza básica
+        sucursal = sucursal.strip().upper()
+        bodega = bodega.strip()
+        empresa = empresa.strip().upper()
+
+        # Validaciones de formato (NO negocio)
+        if not sucursal.isalpha():
+            raise HTTPException(400, "Sucursal debe ser texto (ej: CUC)")
+
+        if not bodega.isdigit():
+            raise HTTPException(400, "Bodega debe ser numérica (ej: 001)")
+
+        # Conexión
         conn = get_connection()
         cursor = conn.cursor()
-        # Llamamos al procedimiento que inserta
-        cursor.execute("{CALL sp_InsertarClientePrueba (?, ?, ?, ?, ?)}", 
-                       (cliente.documento, cliente.cupoOtorgado, cliente.nombres, cliente.apellidos, cliente.email))
-        conn.commit()
-        return {"succeeded": True, "message": "Cliente guardado exitosamente"}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error al guardar: {str(e)}")
-    finally:
-        if 'conn' in locals(): conn.close()
 
-@app.get("/api/Bdatam/GetCustomersBDAtambById", tags=["Bdatam"])
-def get_customer(id: str, auth=Depends(validar_token)):
-    try:
-        conn = get_connection()
-        cursor = conn.cursor()
-        cursor.execute("{CALL sp_ConsultarClientePrueba (?)}", id)
-        row = cursor.fetchone()
-        
-        if row:
-            columnas = [column[0] for column in cursor.description]
-            return dict(zip(columnas, row))
-        
-        raise HTTPException(status_code=404, detail="Cliente no encontrado")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
-    finally:
-        if 'conn' in locals(): conn.close()
+        # 🔥 ORDEN REAL DEL PROCEDIMIENTO
+        cursor.execute(
+            "EXEC Consulta_Bodega_existencia ?, ?, ?",
+            (bodega, sucursal, empresa)
+        )
 
-@app.get("/api/Bdatam/GetAllCustomers", tags=["Bdatam"])
-def get_all_customers(auth=Depends(validar_token)):
-    try:
-        conn = get_connection()
-        cursor = conn.cursor()
-        cursor.execute("{CALL sp_ConsultarTodosClientes}")
+        columns = [col[0] for col in cursor.description]
         rows = cursor.fetchall()
-        
-        if rows:
-            columnas = [column[0] for column in cursor.description]
-            return {"succeeded": True, "data": [dict(zip(columnas, r)) for r in rows]}
-        
-        return {"succeeded": False, "message": "No hay datos"}
+
+        # ÚNICA VALIDACIÓN CORRECTA
+        if not rows:
+            raise HTTPException(
+                status_code=404,
+                detail="No existen datos para esa combinación"
+            )
+
+        data = [dict(zip(columns, row)) for row in rows]
+
+        return {
+            "status": "success",
+            "total_registros": len(data),
+            "data": data
+        }
+
+    except HTTPException:
+        raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error interno: {str(e)}"
+        )
     finally:
-        if 'conn' in locals(): conn.close()
+        try:
+            cursor.close()
+            conn.close()
+        except:
+            pass
+
+
+# =====================================================
+# CONSULTA BODEGA - LISTAS 
+# =====================================================
+
+@app.get("/api/consultas/listas", tags=["Consultas"])
+def obtener_listas(
+    sucursal: str,   # CUC
+    bodega: str,     # 001
+    token: str = Depends(validar_token)
+):
+    try:
+        sucursal = sucursal.strip().upper()
+        bodega = bodega.strip()
+
+        # Validaciones de formato (no negocio)
+        if not sucursal.isalpha():
+            raise HTTPException(400, "Sucursal debe ser texto (ej: CUC)")
+
+        if not bodega.isdigit():
+            raise HTTPException(400, "Bodega debe ser numérica (ej: 001)")
+
+        conn = get_connection()
+        cursor = conn.cursor()
+
+        # ORDEN REAL DEL PROCEDIMIENTO
+        cursor.execute(
+            "EXEC Consulta_Listas ?, ?",
+            (bodega, sucursal)
+        )
+
+        columns = [col[0] for col in cursor.description]
+        rows = cursor.fetchall()
+
+        if not rows:
+            raise HTTPException(
+                status_code=404,
+                detail="No existen datos para esa combinación"
+            )
+
+        data = [dict(zip(columns, row)) for row in rows]
+
+        return {
+            "status": "success",
+            "total_registros": len(data),
+            "data": data
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error interno: {str(e)}"
+        )
+    finally:
+        try:
+            cursor.close()
+            conn.close()
+        except:
+            pass
